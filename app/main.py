@@ -22,6 +22,7 @@ from core.matcher import CandidateFace, MatchResult, find_matches
 from core.query_builder import build_query_embeddings
 from core.result_aggregator import aggregate_results
 from core.reporter import export_results, print_statistics, Statistics
+from core.dataset_index import PreparedDataset
 
 
 @dataclass
@@ -130,6 +131,54 @@ def run_search_pipeline(
         photos_with_faces=photos_with_faces,
         matched_photos=len(results),
         failed_images=failed_images,
+        processing_time=round(elapsed, 2),
+    )
+
+    return PipelineResult(
+        results=results,
+        stats=stats,
+        query_count=len(query_embeddings),
+    )
+
+
+def run_search_from_index(
+    model: object,
+    selfie_paths: list[Path],
+    prepared: PreparedDataset,
+    threshold: float = DEFAULT_THRESHOLD,
+) -> PipelineResult:
+    """Run search against a :class:`PreparedDataset` index.
+
+    This skips dataset scanning and face detection entirely — only
+    selfie processing, matching, and aggregation are performed.
+
+    Args:
+        model: Prepared InsightFace ``FaceAnalysis`` instance.
+        selfie_paths: Paths to selfie image files.
+        prepared: A previously built :class:`PreparedDataset`.
+        threshold: Minimum cosine similarity for a match.
+
+    Returns:
+        A :class:`PipelineResult` with ranked matches and statistics.
+
+    Raises:
+        ValueError: If no valid selfie faces are found.
+    """
+    start_time = time.time()
+
+    query_embeddings = build_query_embeddings(model, selfie_paths)
+    if not query_embeddings:
+        raise ValueError("No valid face detected in any selfie image.")
+
+    raw_matches = find_matches(query_embeddings, prepared.candidate_faces, threshold)
+    results = aggregate_results(raw_matches)
+
+    elapsed = time.time() - start_time
+    stats = Statistics(
+        total_photos_scanned=prepared.total_photos,
+        photos_with_faces=prepared.photos_with_faces,
+        matched_photos=len(results),
+        failed_images=prepared.failed_images,
         processing_time=round(elapsed, 2),
     )
 

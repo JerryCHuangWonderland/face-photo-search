@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
-import insightface
+
+# Suppress FutureWarning from insightface's internal use of a deprecated
+# scikit-image API (SimilarityTransform.estimate → from_estimate).
+warnings.filterwarnings(
+    "ignore",
+    message=r".*`estimate` is deprecated.*",
+    category=FutureWarning,
+)
+
+import insightface  # noqa: E402  (must come after the filter)
 
 from core.config import MODEL_NAME, DET_SIZE, PROVIDERS
 
@@ -73,7 +83,8 @@ def load_image(path: str) -> np.ndarray | None:
     """Read an image from disk using OpenCV.
 
     Uses ``np.fromfile`` + ``cv2.imdecode`` to support file paths
-    containing non-ASCII characters (e.g. Chinese) on Windows.
+    containing non-ASCII characters (e.g. Chinese) on Windows, where
+    ``cv2.imread`` silently fails on such paths.
 
     Args:
         path: File system path to the image.

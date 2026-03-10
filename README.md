@@ -189,20 +189,11 @@ Then open the local URL shown in the terminal.
 
 # Usage Guide
 
-## Step 1 — Upload Selfies
+The system uses a **two-stage workflow**: prepare the dataset once, then search repeatedly.
 
-Upload one or more selfie images containing the person you want to search for.
+## Step 1 — Upload Dataset Folder
 
-Tips:
-
-- Use clear frontal faces
-- Multiple selfies improve matching reliability
-
----
-
-## Step 2 — Upload Dataset Folder
-
-Upload the folder containing the photos you want to search.
+In the sidebar, click **Browse files** under "Upload Dataset Folder" and select the folder containing photos to search.
 
 Supported formats:
 
@@ -214,7 +205,33 @@ Subfolders are supported.
 
 ---
 
-## Step 3 — Adjust Similarity Threshold
+## Step 2 — Prepare Dataset
+
+Click the **⚙️ Prepare** button.
+
+The system will:
+
+1. Scan uploaded images
+2. Detect faces
+3. Extract face embeddings
+4. Build a reusable in-memory index
+
+This only needs to be done **once per dataset**. During preparation, all other controls are disabled. Click **❌ Cancel** to interrupt and switch datasets.
+
+---
+
+## Step 3 — Upload Selfies
+
+Upload one or more selfie images of the person you want to find.
+
+Tips:
+
+- Use clear frontal faces
+- Multiple selfies improve matching reliability
+
+---
+
+## Step 4 — Adjust Similarity Threshold
 
 Default value:
 
@@ -232,17 +249,18 @@ Higher threshold
 
 ---
 
-## Step 4 — Run Search
+## Step 5 — Run Search
 
-Click **Search**.
+Click **🔍 Search**.
 
 The system will:
 
-1. Detect faces
-2. Extract embeddings
-3. Compare embeddings
-4. Filter matches
-5. Display results
+1. Process selfie images
+2. Compare query embeddings against the prepared dataset index
+3. Filter matches by threshold
+4. Display results
+
+Search is fast and repeatable — you can adjust the threshold or change selfies and search again without re-preparing the dataset.
 
 ---
 
@@ -318,11 +336,12 @@ These include:
 
 Current approach:
 
-- embeddings are computed during each search
+- Dataset embeddings are preprocessed once and cached in memory
+- Repeated searches reuse the cached index without recomputation
 
 Potential future optimizations:
 
-- embedding cache
+- Persistent embedding cache (disk-based)
 - FAISS vector index
 - GPU acceleration
 
