@@ -1,0 +1,8 @@
+# NOTE: Requires Python 3.12 (InsightFace does not support Python 3.13+)
+insightface>=0.7.3
+opencv-python>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+streamlit>=1.28.0
+tqdm>=4.65.0
+onnxruntime>=1.16.0
