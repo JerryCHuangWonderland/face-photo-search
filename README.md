@@ -1,6 +1,8 @@
 
 # Face Photo Search System
 
+[繁體中文版 README](README.zh-TW.md)
+
 AI-powered facial search tool that scans a photo collection and finds images containing a specific person using selfie input.
 
 This project demonstrates **AI‑assisted development (Vibe Coding)** where system design, implementation, testing, and documentation were iteratively developed with AI collaboration.
@@ -274,6 +276,7 @@ Example statistics:
 face-photo-search
 │
 ├─ README.md
+├─ README.zh-TW.md
 │
 ├─ docs
 │  ├─ screenshots
