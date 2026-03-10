@@ -82,11 +82,20 @@ def _save_uploads_to_dir(
 def _draw_bbox(image_path: str, bbox: list[int]) -> Image.Image | None:
     """Load a photo and draw the matched-face bounding box.
 
+    Uses ``np.fromfile`` + ``cv2.imdecode`` to support file paths
+    containing non-ASCII characters (e.g. Chinese) on Windows.
+
     Returns:
         PIL RGB image with the bounding box drawn, or ``None`` if the
         file cannot be read.
     """
-    img = cv2.imread(image_path)
+    import numpy as np
+
+    try:
+        data = np.fromfile(image_path, dtype=np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    except Exception:
+        img = None
     if img is None:
         return None
     h, w = img.shape[:2]
@@ -133,10 +142,16 @@ def main() -> None:
             help="Upload clear selfie photos of the person to search for.",
         )
 
+        # Use a counter in session_state to generate a fresh widget key
+        # so that clicking "Clear" resets the file uploader.
+        if "dataset_uploader_key" not in st.session_state:
+            st.session_state["dataset_uploader_key"] = 0
+
         uploaded_dataset = st.file_uploader(
             "Upload Dataset Folder",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files="directory",
+            key=f"dataset_uploader_{st.session_state['dataset_uploader_key']}",
             help=(
                 "Click **Browse files** and select your photo folder. "
                 "All images (including subfolders) will be uploaded. "
@@ -146,6 +161,11 @@ def main() -> None:
 
         if uploaded_dataset:
             st.caption(f"📁 {len(uploaded_dataset)} photo(s) uploaded from folder")
+            if st.button("🗑️ Clear Dataset", use_container_width=True):
+                st.session_state["dataset_uploader_key"] += 1
+                st.session_state.pop("search_result", None)
+                st.session_state.pop("result_images", None)
+                st.rerun()
 
         threshold = st.slider(
             "Similarity Threshold",

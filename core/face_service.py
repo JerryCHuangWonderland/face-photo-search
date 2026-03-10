@@ -72,11 +72,18 @@ def detect_faces(
 def load_image(path: str) -> np.ndarray | None:
     """Read an image from disk using OpenCV.
 
+    Uses ``np.fromfile`` + ``cv2.imdecode`` to support file paths
+    containing non-ASCII characters (e.g. Chinese) on Windows.
+
     Args:
         path: File system path to the image.
 
     Returns:
         BGR image array, or ``None`` if the file could not be read.
     """
-    image = cv2.imread(str(path))
-    return image
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        return image
+    except Exception:
+        return None
