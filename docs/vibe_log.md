@@ -235,7 +235,176 @@ Future Implementation Options:
 
 Status:
 
-This optimization is documented for future implementation but not required for the MVP demo.
+Implemented in Iteration 8.
+
+---
+
+## Iteration 8 — Dataset Preprocessing and Indexed Search Implementation
+
+Goal:
+Implement the dataset preprocessing and indexed search workflow
+that was previously proposed in Iteration 7.
+
+Problem:
+The original pipeline recomputed face detection and embeddings
+for the entire dataset during every search run.
+
+In testing:
+
+- Dataset size: 348 photos
+- Total search time: ~1607 seconds
+
+Most processing time was spent on:
+
+- loading images
+- face detection
+- embedding extraction
+
+This made repeated searches slow and impractical.
+
+Implementation:
+
+A two-stage workflow was introduced:
+
+1. **Prepare Dataset**
+2. **Search**
+
+Dataset Preparation:
+
+- scan dataset images
+- detect faces
+- extract embeddings
+- build a reusable dataset index
+- cache candidate face embeddings in memory
+
+Search Stage:
+
+- process selfie images
+- generate query embeddings
+- compare against cached dataset embeddings
+- aggregate results
+
+UI Improvements:
+
+- Added **Prepare Dataset** button
+- Added **Cancel** option during dataset preparation
+- Disabled Search until dataset is prepared
+- Disabled UI controls during preparation/search
+- Added dataset-ready indicator in sidebar
+
+Technical Changes:
+
+- Introduced `PreparedDataset` structure
+- Implemented `prepare_dataset()` preprocessing pipeline
+- Added `run_search_from_index()` search function
+- Cached dataset images for result rendering
+- Invalidated dataset cache when dataset changes
+
+Result:
+
+Dataset preprocessing now runs **only once per dataset upload**.
+
+Subsequent searches reuse the cached embeddings and complete
+significantly faster.
+
+This architecture improves usability for repeated searches and
+enables scaling to larger datasets.
+
+### Performance Comparison
+
+A performance comparison was conducted before and after introducing
+dataset preprocessing and indexed search.
+
+Initial implementation (no dataset index):
+
+- Dataset size: 348 photos
+- Total processing time: **1607 seconds**
+- Each search recomputed:
+  - image loading
+  - face detection
+  - embedding extraction
+
+Indexed implementation (Prepare Dataset + Search):
+
+- Dataset preprocessing runs **once per dataset upload**
+- Subsequent searches reuse the cached embeddings
+
+Expected behavior after indexing:
+
+Prepare Dataset (one-time):
+
+- scan dataset
+- detect faces
+- extract embeddings
+- build dataset index
+
+Search:
+
+- process selfie images
+- compare query embeddings with cached dataset embeddings
+
+This change shifts the complexity from:
+
+O(N × detection + embedding) per search
+
+to:
+
+O(N × detection + embedding) once
+
+- O(Q × similarity search)
+
+Where:
+
+- N = dataset size
+- Q = number of user searches
+
+This significantly improves responsiveness when performing
+multiple searches on the same dataset.
+
+---
+
+## Iteration 9 — Persistent Saved Datasets and One-Click Launch
+
+Goal:
+Make prepared dataset indexes reusable across reruns and sessions,
+and reduce launch friction for local demos.
+
+Problem:
+The two-stage workflow introduced in Iteration 8 only kept the
+prepared dataset in Streamlit session state.
+
+This meant:
+
+- the prepared index was lost after rerun / restart
+- users had to re-upload and re-prepare the same dataset
+- there was no way to switch between previously prepared datasets
+- launching the UI still required manually activating the virtual environment
+
+Implementation:
+
+- Added persisted dataset storage under `data/dataset/<dataset_name>`
+- Stored dataset metadata, preparation time, and embedding matrix on disk
+- Copied uploaded dataset photos into the saved dataset folder so result images can be rendered later
+- Added saved dataset summaries for sidebar selection
+- Replaced the old Prepare action with:
+  1. enter dataset name
+  2. prepare dataset
+  3. save reusable index
+- Added a Saved Dataset dropdown next to the Prepare controls
+- Loaded saved datasets back into `PreparedDataset` for indexed search reuse
+- Switched result rendering to load saved images from disk on demand when they are not already cached in memory
+- Added `run_app.bat` to launch Streamlit directly with the project's `.venv`
+
+Result:
+
+Prepared datasets can now be reused without rebuilding the index each time.
+
+Users can:
+
+- select an existing dataset from the sidebar
+- create a new named dataset index
+- keep using saved dataset preparation times as part of the UI feedback
+- launch the demo without manually activating the environment
 
 ---
 

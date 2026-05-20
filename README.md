@@ -1,4 +1,3 @@
-
 # Face Photo Search System
 
 [繁體中文版 README](README.zh-TW.md)
@@ -37,6 +36,7 @@ Matched photos are displayed with:
 - similarity score
 - ranking
 - statistics
+- reusable saved dataset indexes
 
 Example search result for a dataset of ~200 photos.
 
@@ -53,6 +53,8 @@ Example search result for a dataset of ~200 photos.
 - Bounding box visualization
 - Search statistics
 - JSON result export
+- Reusable saved dataset indexes
+- One-click Windows launcher (`run_app.bat`)
 - Streamlit web UI
 
 ---
@@ -73,16 +75,16 @@ Aggregator --> Results
 
 Module responsibilities:
 
-| Module | Responsibility |
-|------|------|
-| `app/ui.py` | Streamlit interface |
-| `app/main.py` | Pipeline orchestration |
-| `core/face_service.py` | Face detection + embedding extraction |
-| `core/file_scanner.py` | Dataset image discovery |
-| `core/query_builder.py` | Build query embeddings |
-| `core/matcher.py` | Cosine similarity matching |
-| `core/result_aggregator.py` | Merge duplicate matches |
-| `core/reporter.py` | Export statistics and JSON output |
+| Module                      | Responsibility                        |
+| --------------------------- | ------------------------------------- |
+| `app/ui.py`                 | Streamlit interface                   |
+| `app/main.py`               | Pipeline orchestration                |
+| `core/face_service.py`      | Face detection + embedding extraction |
+| `core/file_scanner.py`      | Dataset image discovery               |
+| `core/query_builder.py`     | Build query embeddings                |
+| `core/matcher.py`           | Cosine similarity matching            |
+| `core/result_aggregator.py` | Merge duplicate matches               |
+| `core/reporter.py`          | Export statistics and JSON output     |
 
 ---
 
@@ -113,17 +115,21 @@ Aggregation --> Results
 # Technology Stack
 
 Language
+
 - Python 3.12
 
 Computer Vision
+
 - InsightFace (buffalo_l model)
 
 Libraries
+
 - OpenCV
 - NumPy
 - Streamlit
 
 Similarity Metric
+
 - Cosine Similarity
 
 ---
@@ -185,13 +191,25 @@ streamlit run app/ui.py
 
 Then open the local URL shown in the terminal.
 
+Windows shortcut:
+
+```
+run_app.bat
+```
+
+This starts the app with `.venv\Scripts\python.exe` directly, so you do not need to activate the virtual environment manually.
+
 ---
 
 # Usage Guide
 
 The system uses a **two-stage workflow**: prepare the dataset once, then search repeatedly.
 
-## Step 1 — Upload Dataset Folder
+## Step 1 — Select a Saved Dataset or Upload a New Folder
+
+If you already prepared a dataset before, choose it from **Saved Dataset** and search immediately.
+
+To create a new reusable dataset, upload a folder under **Upload Dataset Folder**.
 
 In the sidebar, click **Browse files** under "Upload Dataset Folder" and select the folder containing photos to search.
 
@@ -205,18 +223,18 @@ Subfolders are supported.
 
 ---
 
-## Step 2 — Prepare Dataset
+## Step 2 — Name and Prepare Dataset
 
-Click the **⚙️ Prepare** button.
+Enter a name in **New Dataset Name**, then click **⚙️ Prepare**.
 
 The system will:
 
 1. Scan uploaded images
 2. Detect faces
 3. Extract face embeddings
-4. Build a reusable in-memory index
+4. Save a reusable dataset index under `data/dataset/<dataset-name>`
 
-This only needs to be done **once per dataset**. During preparation, all other controls are disabled. Click **❌ Cancel** to interrupt and switch datasets.
+This only needs to be done **once per dataset**. During preparation, all other controls are disabled. Click **❌ Cancel** to interrupt.
 
 ---
 
@@ -240,10 +258,12 @@ Default value:
 ```
 
 Lower threshold
+
 - higher recall
 - more matches
 
 Higher threshold
+
 - higher precision
 - fewer matches
 
@@ -295,6 +315,12 @@ face-photo-search
 │
 ├─ README.md
 ├─ README.zh-TW.md
+├─ run_app.bat
+│
+├─ data
+│  ├─ dataset
+│  ├─ demo_photos
+│  └─ demo_selfies
 │
 ├─ docs
 │  ├─ screenshots
@@ -336,12 +362,12 @@ These include:
 
 Current approach:
 
-- Dataset embeddings are preprocessed once and cached in memory
-- Repeated searches reuse the cached index without recomputation
+- Dataset embeddings are preprocessed once and saved under `data/dataset`
+- Repeated searches can reuse the saved index across reruns and sessions
+- Result images are loaded from the saved dataset snapshot when needed
 
 Potential future optimizations:
 
-- Persistent embedding cache (disk-based)
 - FAISS vector index
 - GPU acceleration
 

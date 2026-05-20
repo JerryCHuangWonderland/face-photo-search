@@ -783,6 +783,7 @@ Provide concrete working code.
 `app/main.py` — 將 `processing_time=round(elapsed + prepared.preparation_time, 2)` 改為 `processing_time=round(elapsed, 2)`
 
 `app/ui.py` — Statistics 區：
+
 ```python
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.metric("Photos Scanned", s.total_photos_scanned)
@@ -814,6 +815,7 @@ c6.metric("Search", f"{s.processing_time:.1f}s")
 **關鍵架構變更：**
 
 兩階段 Prepare 流程（避免死鎖）：
+
 ```python
 # Phase 1: 設定 flag 並 rerun，讓 sidebar 重新渲染為 disabled
 if prepare_clicked:
@@ -831,6 +833,7 @@ if is_preparing and not dataset_ready:
 ```
 
 Cancel 按鈕（永不 disabled）：
+
 ```python
 if is_preparing:
     cancel_clicked = st.button("❌ Cancel", type="primary")
@@ -839,9 +842,10 @@ else:
 ```
 
 CSS 隱藏檔名列表：
+
 ```css
 .st-key-dataset_upload_section [data-testid="stFileUploaderFileList"] {
-    display: none !important;
+  display: none !important;
 }
 ```
 
@@ -865,6 +869,7 @@ CSS 隱藏檔名列表：
 **變更內容：**
 
 README.md Usage Guide 改為 5 步驟：
+
 - Step 1 — Upload Dataset Folder
 - Step 2 — Prepare Dataset（說明 Cancel 用途）
 - Step 3 — Upload Selfies
@@ -872,6 +877,7 @@ README.md Usage Guide 改為 5 步驟：
 - Step 5 — Run Search（說明可重複搜尋）
 
 Performance Notes 更新：
+
 - 「embeddings are computed during each search」→「Dataset embeddings are preprocessed once and cached in memory」
 - 「embedding cache」→「Persistent embedding cache (disk-based)」
 
@@ -906,6 +912,7 @@ README.zh-TW.md 同步更新相同內容。
 - 刪除根目錄 `spec.md`
 - Stage 7 個檔案（README.md, README.zh-TW.md, app/main.py, app/ui.py, core/face_service.py, core/dataset_index.py, spec.md）
 - Commit message:
+
 ```
 feat: two-stage prepare/search workflow, UI improvements, and bug fixes
 
@@ -925,6 +932,7 @@ feat: two-stage prepare/search workflow, UI improvements, and bug fixes
 - Update Performance Notes to reflect implemented caching
 - Remove duplicate spec.md from project root
 ```
+
 - Rebase 時解決 `app/ui.py` 和 `core/face_service.py` 的衝突
 - Push 至 GitHub（`8a2d5bc`）
 
@@ -958,6 +966,7 @@ feat: two-stage prepare/search workflow, UI improvements, and bug fixes
 已推送（`f251fab`）。之前沒放進去是因為我只 stage 了程式碼和文件檔案，漏掉了 `docs/screenshots/` 裡的圖片。現在三張截圖都已更新上去了。
 
 Commit:
+
 ```
 docs: update screenshots for new two-stage UI
 ```
@@ -1008,9 +1017,37 @@ docs: update screenshots for new two-stage UI
 
 ## Git Commit 紀錄
 
-| Commit | 說明 |
-|--------|------|
-| `2271bba` | docs: add Traditional Chinese README |
+| Commit    | 說明                                                                    |
+| --------- | ----------------------------------------------------------------------- |
+| `2271bba` | docs: add Traditional Chinese README                                    |
 | `8a2d5bc` | feat: two-stage prepare/search workflow, UI improvements, and bug fixes |
-| `f251fab` | docs: update screenshots for new two-stage UI |
-| `1239418` | docs: add session prompt log |
+| `f251fab` | docs: update screenshots for new two-stage UI                           |
+
+---
+
+## Prompt 22 — 持久化資料集索引 + 下拉選單 + 啟動 bat
+
+### User Prompt
+
+```
+這是一個人臉辨識的工具專案，使用者上傳照片後再選擇個人照來查找。
+把目前的Prepare按鈕旁邊新增下拉選單，可選擇以建立好索引的資料集。
+把現行Prepare按鈕的功能改成建立資料集並讓使用者可以輸入名稱，將索引過的資料集儲存起來可以被覆用。
+每個資料集建立時所用的時間先保留起來，像現在的搜尋結果一樣可以顯示出來，檔案位置可以儲存在data/dataset。
+最後建立一個執行檔(bat也可)讓運行這個站台的時候不用手動從cmd去下指令從venv執行"streamlit run app/ui.py"。
+如果有任何需要事先確認的就提出來不要直接開工，然後將這次的紀錄寫進(如果該寫)docs/prompt_log.md、session_log.md、vibe_log.md
+```
+
+### AI Response (摘要)
+
+- 先確認兩點需求：
+  - 是否可將原始資料集照片一併複製到 `data/dataset/<dataset_name>` 以便之後重用與顯示結果
+  - 同名資料集是否採「不覆蓋，提示改名」
+- 使用者確認兩點皆可後，實作：
+  - `core/dataset_index.py` 新增資料集持久化儲存/載入與摘要列舉
+  - `app/ui.py` 新增 Saved Dataset 下拉選單
+  - Prepare 改為需輸入資料集名稱並將索引保存到 `data/dataset`
+  - 搜尋結果可從已保存資料集快照載入圖片
+  - 新增 `run_app.bat` 一鍵啟動
+  - 同步更新 README、`docs/prompt_log.md`、`docs/session_log.md`、`docs/vibe_log.md`
+    | `1239418` | docs: add session prompt log |

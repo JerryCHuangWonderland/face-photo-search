@@ -23,3 +23,6 @@ SLIDER_STEP: float = 0.05
 # Output paths
 OUTPUT_DIR: str = "outputs"
 RESULTS_FILENAME: str = "results.json"
+
+# Persisted dataset index storage
+DATASET_STORAGE_DIR: str = "data/dataset"

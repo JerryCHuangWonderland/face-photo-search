@@ -5,8 +5,9 @@ Run from the project root with::
     py -3.12 -m streamlit run app/ui.py
 
 Workflow:
-    1. Upload dataset folder → click **Prepare Dataset** (one-time).
-    2. Upload selfie(s) → adjust threshold → click **Search** (fast, repeatable).
+    1. Select a saved dataset or upload a new dataset folder.
+    2. Enter a dataset name and click **Prepare** to save a reusable index.
+    3. Upload selfie(s) → adjust threshold → click **Search**.
 """
 
 from __future__ import annotations
@@ -25,8 +26,26 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from core.config import DEFAULT_THRESHOLD, SLIDER_MIN, SLIDER_MAX, SLIDER_STEP
-from core.dataset_index import PreparedDataset, prepare_dataset
+from core.config import (
+    DATASET_STORAGE_DIR,
+    DEFAULT_THRESHOLD,
+    SLIDER_MAX,
+    SLIDER_MIN,
+    SLIDER_STEP,
+)
+from core.dataset_index import (
+    DatasetPhotoInfo,
+    DatasetSummary,
+    PreparedDataset,
+    delete_saved_dataset,
+    list_dataset_photos,
+    list_saved_datasets,
+    load_prepared_dataset,
+    prepare_dataset,
+    rename_saved_dataset,
+    save_prepared_dataset,
+    validate_dataset_name,
+)
 from core.face_service import load_model
 from core.reporter import export_results
 from app.main import run_search_from_index
@@ -90,14 +109,91 @@ def _cleanup_temp_dir(path: Path | None) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def _clear_search_state() -> None:
+    """Clear the current search output while preserving the active dataset."""
+    for key in ("search_result", "result_images"):
+        st.session_state.pop(key, None)
+
+
 def _invalidate_dataset() -> None:
     """Remove all dataset-related state so the UI resets cleanly."""
-    for key in (
-        "prepared_dataset",
-        "search_result",
-        "result_images",
-    ):
+    for key in ("prepared_dataset", "loaded_dataset_name"):
         st.session_state.pop(key, None)
+    _clear_search_state()
+
+
+def _queue_notice(level: str, message: str) -> None:
+    """Store a sidebar notice to show after a rerun."""
+    st.session_state["dataset_notice"] = {
+        "level": level,
+        "message": message,
+    }
+
+
+def _queue_dataset_selection(dataset_name: str) -> None:
+    """Defer dataset selector updates until the next rerun."""
+    st.session_state["pending_selected_dataset_name"] = dataset_name
+
+
+def _queue_new_dataset_name(value: str) -> None:
+    """Defer new dataset name input updates until the next rerun."""
+    st.session_state["pending_new_dataset_name"] = value
+
+
+def _sync_dataset_manager_state(dataset_name: str) -> None:
+    """Keep dataset manager widget state aligned with the active dataset."""
+    current_target = st.session_state.get("dataset_manager_target", "")
+    if dataset_name and current_target != dataset_name:
+        st.session_state["dataset_manager_target"] = dataset_name
+        st.session_state["rename_dataset_name"] = dataset_name
+        st.session_state["dataset_photo_filter"] = ""
+    elif not dataset_name:
+        st.session_state.pop("dataset_manager_target", None)
+
+
+def _format_saved_dataset(
+    dataset_name: str,
+    summary_map: dict[str, DatasetSummary],
+) -> str:
+    """Render a human-friendly label for the saved dataset selector."""
+    if not dataset_name:
+        return "Select saved dataset"
+
+    summary = summary_map[dataset_name]
+    return (
+        f"{summary.name} · {summary.total_photos} photos · "
+        f"{summary.candidate_faces} faces · {summary.preparation_time:.1f}s"
+    )
+
+
+def _render_match_image(
+    prepared: PreparedDataset,
+    photo_path: str,
+    bbox: list[int],
+) -> Image.Image | None:
+    """Render a result image from cache or by loading the stored dataset photo."""
+    src_img = _load_dataset_image(prepared, photo_path)
+    if src_img is None:
+        return None
+
+    return _draw_bbox_from_cache(src_img, bbox)
+
+
+def _load_dataset_image(
+    prepared: PreparedDataset,
+    photo_path: str,
+) -> Image.Image | None:
+    """Load a stored dataset image into the in-memory cache on demand."""
+    src_img = prepared.image_cache.get(photo_path)
+    if src_img is None:
+        photo = Path(photo_path)
+        if not photo.exists():
+            return None
+        with Image.open(photo) as pil_img:
+            src_img = pil_img.convert("RGB")
+        prepared.image_cache[photo_path] = src_img
+
+    return src_img
 
 
 # ── Page layout ────────────────────────────────────────────────────────
@@ -126,13 +222,59 @@ def main() -> None:
 
     st.title("📷 Face Photo Search")
     st.caption(
-        "Upload a dataset folder and prepare it once, then search "
-        "repeatedly with different selfies or thresholds."
+        "Reuse saved dataset indexes or create a new one from an uploaded "
+        "folder, then search repeatedly with different selfies or thresholds."
     )
 
-    # State flags
-    dataset_ready: bool = "prepared_dataset" in st.session_state
+    saved_datasets = list_saved_datasets()
+    summary_map = {summary.name: summary for summary in saved_datasets}
+
+    pending_selected_dataset_name = st.session_state.pop(
+        "pending_selected_dataset_name", None
+    )
+    if pending_selected_dataset_name is not None:
+        st.session_state["selected_dataset_name"] = pending_selected_dataset_name
+
+    pending_new_dataset_name = st.session_state.pop(
+        "pending_new_dataset_name", None
+    )
+    if pending_new_dataset_name is not None:
+        st.session_state["new_dataset_name"] = pending_new_dataset_name
+
+    if "selected_dataset_name" not in st.session_state:
+        st.session_state["selected_dataset_name"] = ""
+    if st.session_state["selected_dataset_name"] not in {"", *summary_map}:
+        st.session_state["selected_dataset_name"] = ""
+
     is_preparing: bool = st.session_state.get("is_preparing", False)
+    if not is_preparing:
+        selected_dataset_name = st.session_state.get("selected_dataset_name", "")
+        loaded_dataset_name = st.session_state.get("loaded_dataset_name", "")
+
+        if selected_dataset_name and selected_dataset_name != loaded_dataset_name:
+            try:
+                st.session_state["prepared_dataset"] = load_prepared_dataset(
+                    selected_dataset_name
+                )
+                st.session_state["loaded_dataset_name"] = selected_dataset_name
+                _clear_search_state()
+            except Exception as exc:
+                st.session_state["selected_dataset_name"] = ""
+                _invalidate_dataset()
+                _queue_notice(
+                    "error",
+                    f"Failed to load dataset '{selected_dataset_name}': {exc}",
+                )
+        elif not selected_dataset_name and loaded_dataset_name:
+            _invalidate_dataset()
+
+    _sync_dataset_manager_state(st.session_state.get("selected_dataset_name", ""))
+
+    dataset_ready: bool = "prepared_dataset" in st.session_state
+    rename_clicked = False
+    delete_clicked = False
+    active_dataset_name = st.session_state.get("selected_dataset_name", "")
+    active_summary = summary_map.get(active_dataset_name)
 
     # ── Sidebar ────────────────────────────────────────────────────────
 
@@ -173,21 +315,34 @@ def main() -> None:
         elif is_preparing:
             st.caption("⏳ Preparing dataset…")
 
-        # Prepare / Cancel buttons side-by-side
+        dataset_name_input = st.text_input(
+            "New Dataset Name",
+            key="new_dataset_name",
+            help=(
+                "Used as the reusable dataset index folder name under "
+                f"{DATASET_STORAGE_DIR}."
+            ),
+            placeholder="e.g. company_party_2026",
+            disabled=is_preparing,
+        )
+
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             prepare_clicked = st.button(
                 "⚙️ Prepare",
                 use_container_width=True,
-                disabled=is_preparing or not uploaded_dataset or dataset_ready,
+                disabled=(
+                    is_preparing
+                    or not uploaded_dataset
+                    or not dataset_name_input.strip()
+                ),
                 help=(
-                    "Preprocess the dataset (detect faces & extract embeddings). "
-                    "Required once before searching."
+                    "Create a reusable dataset index from the uploaded folder "
+                    "and save it for future searches."
                 ),
             )
         with btn_col2:
             if is_preparing:
-                # Cancel is NEVER disabled — guarantees the user can always escape
                 cancel_clicked = st.button(
                     "❌ Cancel",
                     key="cancel_prepare_btn",
@@ -204,14 +359,68 @@ def main() -> None:
                     disabled=not uploaded_dataset and not dataset_ready,
                 )
 
+        st.selectbox(
+            "Saved Dataset",
+            options=[""] + [summary.name for summary in saved_datasets],
+            key="selected_dataset_name",
+            format_func=lambda name: _format_saved_dataset(name, summary_map),
+            disabled=is_preparing,
+        )
+
+        st.caption(f"💾 Saved dataset indexes are stored in {DATASET_STORAGE_DIR}")
+
+        active_dataset_name = st.session_state.get("selected_dataset_name", "")
+        active_summary = summary_map.get(active_dataset_name)
+
+        if dataset_name_input.strip() and dataset_name_input.strip() in summary_map:
+            st.caption("⚠️ This dataset name already exists. Choose a different name.")
+
         if dataset_ready:
             prep: PreparedDataset = st.session_state["prepared_dataset"]
             st.success(
-                f"✅ Dataset ready — {prep.total_photos} photos, "
-                f"{len(prep.candidate_faces)} faces "
+                f"✅ Dataset ready — {prep.dataset_name or 'Current dataset'} · "
+                f"{prep.total_photos} photos, {len(prep.candidate_faces)} faces "
                 f"({prep.preparation_time:.1f}s)",
                 icon="✅",
             )
+            if prep.dataset_name in summary_map:
+                st.caption(f"Created: {summary_map[prep.dataset_name].created_at}")
+
+        if active_summary is not None:
+            with st.expander("🗂️ Manage Saved Dataset", expanded=False):
+                st.caption(
+                    f"Selected: {active_summary.name} · {active_summary.total_photos} photos"
+                )
+                st.text_input(
+                    "Rename Selected Dataset",
+                    key="rename_dataset_name",
+                    disabled=is_preparing,
+                )
+                delete_confirmed = st.checkbox(
+                    "I understand this will permanently delete the saved dataset files.",
+                    key=f"confirm_delete_{active_dataset_name}",
+                    disabled=is_preparing,
+                )
+                action_col1, action_col2 = st.columns(2)
+                with action_col1:
+                    rename_clicked = st.button(
+                        "✏️ Rename",
+                        key="rename_dataset_btn",
+                        use_container_width=True,
+                        disabled=is_preparing
+                        or not st.session_state.get("rename_dataset_name", "").strip(),
+                    )
+                with action_col2:
+                    delete_clicked = st.button(
+                        "🗑️ Delete",
+                        key="delete_dataset_btn",
+                        use_container_width=True,
+                        disabled=is_preparing or not delete_confirmed,
+                    )
+
+        notice = st.session_state.pop("dataset_notice", None)
+        if notice is not None:
+            getattr(st, notice["level"])(notice["message"])
 
         st.divider()
 
@@ -233,27 +442,80 @@ def main() -> None:
             disabled=is_preparing or not dataset_ready,
         )
 
-        if not dataset_ready and uploaded_dataset and not is_preparing:
-            st.info("👆 Click **Prepare** to preprocess the dataset before searching.")
+        if not dataset_ready and not is_preparing:
+            st.info(
+                "👆 Select a saved dataset, or upload a folder, enter a name, "
+                "and click **Prepare**."
+            )
 
     # ── Handle Prepare request (phase 1: set flag → rerun) ─────────────
 
     if prepare_clicked:
-        st.session_state["is_preparing"] = True
-        _invalidate_dataset()
-        st.rerun()
+        try:
+            pending_dataset_name = validate_dataset_name(dataset_name_input)
+        except ValueError as exc:
+            st.error(f"❌ {exc}")
+        else:
+            if pending_dataset_name in summary_map:
+                st.error(
+                    f"❌ Dataset '{pending_dataset_name}' already exists. "
+                    "Please choose another name."
+                )
+            else:
+                st.session_state["is_preparing"] = True
+                st.session_state["pending_dataset_name"] = pending_dataset_name
+                st.rerun()
 
     # ── Handle Cancel ──────────────────────────────────────────────────
 
     if cancel_clicked:
         st.session_state.pop("is_preparing", None)
+        st.session_state.pop("pending_dataset_name", None)
         st.rerun()
 
     # ── Handle Clear ───────────────────────────────────────────────────
 
     if clear_clicked:
         st.session_state["dataset_uploader_key"] += 1
+        _queue_dataset_selection("")
+        st.session_state.pop("pending_dataset_name", None)
         _invalidate_dataset()
+        st.rerun()
+
+    if rename_clicked and active_dataset_name:
+        try:
+            updated_name = validate_dataset_name(
+                st.session_state.get("rename_dataset_name", "")
+            )
+            if updated_name == active_dataset_name:
+                _queue_notice("info", "Dataset name is unchanged.")
+            else:
+                rename_saved_dataset(active_dataset_name, updated_name)
+                _queue_dataset_selection(updated_name)
+                _invalidate_dataset()
+                _queue_notice(
+                    "success",
+                    f"Dataset '{active_dataset_name}' was renamed to '{updated_name}'.",
+                )
+        except ValueError as exc:
+            _queue_notice("error", f"❌ {exc}")
+        except FileExistsError as exc:
+            _queue_notice("error", f"❌ {exc}")
+        except FileNotFoundError as exc:
+            _queue_notice("error", f"❌ {exc}")
+        st.rerun()
+
+    if delete_clicked and active_dataset_name:
+        try:
+            delete_saved_dataset(active_dataset_name)
+            _queue_dataset_selection("")
+            _invalidate_dataset()
+            _queue_notice(
+                "success",
+                f"Dataset '{active_dataset_name}' was deleted.",
+            )
+        except FileNotFoundError as exc:
+            _queue_notice("error", f"❌ {exc}")
         st.rerun()
 
     # ── Query face preview ─────────────────────────────────────────────
@@ -266,12 +528,68 @@ def main() -> None:
                 pil_img = Image.open(selfie_file)
                 st.image(pil_img, caption=selfie_file.name, width="stretch")
 
+    if dataset_ready and not is_preparing:
+        prepared = st.session_state["prepared_dataset"]
+        try:
+            dataset_photos = list_dataset_photos(prepared.dataset_name)
+        except FileNotFoundError:
+            dataset_photos = []
+
+        st.divider()
+        with st.expander("🖼️ Dataset Photos", expanded=False):
+            st.caption(
+                "Browse the original photos stored with the selected dataset index."
+            )
+            photo_filter = st.text_input(
+                "Filter Photos",
+                key="dataset_photo_filter",
+                placeholder="Search by file name or folder",
+            ).strip()
+            preview_limit = st.select_slider(
+                "Preview Count",
+                options=[12, 24, 48, 96],
+                value=24,
+                key="dataset_preview_limit",
+            )
+
+            filtered_photos = [
+                photo
+                for photo in dataset_photos
+                if not photo_filter
+                or photo_filter.lower() in photo.display_name.lower()
+            ]
+
+            st.caption(
+                f"Showing {min(len(filtered_photos), preview_limit)} of {len(filtered_photos)} photo(s)"
+            )
+
+            if not filtered_photos:
+                st.info("No photos match the current filter.")
+            else:
+                preview_photos = filtered_photos[:preview_limit]
+                preview_cols = st.columns(4)
+                for idx, photo in enumerate(preview_photos):
+                    with preview_cols[idx % len(preview_cols)]:
+                        image = _load_dataset_image(prepared, photo.path)
+                        if image is not None:
+                            st.image(image, width="stretch")
+                        else:
+                            st.warning("Could not load this photo.")
+                        st.caption(photo.display_name)
+
     # ── Prepare Dataset execution (phase 2: run after rerun) ───────────
 
-    if is_preparing and not dataset_ready:
-        if not uploaded_dataset:
-            st.warning("⚠️ No dataset files available. Please re-upload.")
+    if is_preparing:
+        pending_dataset_name = st.session_state.get("pending_dataset_name", "")
+        if not pending_dataset_name:
+            _queue_notice("warning", "No dataset name was provided. Please try again.")
             st.session_state.pop("is_preparing", None)
+            st.rerun()
+
+        if not uploaded_dataset:
+            _queue_notice("warning", "No dataset files are available. Please re-upload.")
+            st.session_state.pop("is_preparing", None)
+            st.session_state.pop("pending_dataset_name", None)
             st.rerun()
 
         dataset_tmp: Path | None = None
@@ -301,16 +619,32 @@ def main() -> None:
                 on_progress=_on_prep_progress,
             )
 
-            progress.progress(1.0, text="✅ Dataset prepared!")
-            st.session_state["prepared_dataset"] = prepared
+            save_prepared_dataset(
+                prepared=prepared,
+                dataset_name=pending_dataset_name,
+                source_dir=dataset_tmp,
+            )
+
+            progress.progress(1.0, text="✅ Dataset prepared and saved!")
+            _queue_dataset_selection(pending_dataset_name)
+            _queue_new_dataset_name("")
+            _invalidate_dataset()
+            _clear_search_state()
+            _queue_notice(
+                "success",
+                f"Dataset '{pending_dataset_name}' was saved for reuse.",
+            )
 
         except ValueError as ve:
-            st.warning(f"⚠️ {ve}")
+            _queue_notice("warning", f"⚠️ {ve}")
+        except FileExistsError as exc:
+            _queue_notice("error", f"❌ {exc}")
         except Exception as exc:
-            st.error(f"❌ Dataset preparation failed: {exc}")
+            _queue_notice("error", f"❌ Dataset preparation failed: {exc}")
         finally:
             _cleanup_temp_dir(dataset_tmp)
             st.session_state.pop("is_preparing", None)
+            st.session_state.pop("pending_dataset_name", None)
             st.rerun()
 
     # ── Search execution ───────────────────────────────────────────────
@@ -346,13 +680,13 @@ def main() -> None:
             # Render result images from the prepared image cache
             cached_images: list[Image.Image | None] = []
             for match in result.results:
-                src_img = prepared.image_cache.get(match.photo_path)
-                if src_img is not None:
-                    cached_images.append(
-                        _draw_bbox_from_cache(src_img, match.best_bbox)
+                cached_images.append(
+                    _render_match_image(
+                        prepared=prepared,
+                        photo_path=match.photo_path,
+                        bbox=match.best_bbox,
                     )
-                else:
-                    cached_images.append(None)
+                )
 
             st.session_state["search_result"] = result
             st.session_state["result_images"] = cached_images
@@ -401,11 +735,7 @@ def main() -> None:
                         )
 
                     original = name_map.get(match.photo_path, "")
-                    file_name = (
-                        Path(original).name
-                        if original
-                        else Path(match.photo_path).name
-                    )
+                    file_name = original or Path(match.photo_path).name
                     st.markdown(
                         f"**Rank #{match.rank}** · Score: `{match.best_score:.4f}`\n\n"
                         f"📁 `{file_name}`"

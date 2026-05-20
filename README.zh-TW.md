@@ -1,4 +1,3 @@
-
 # 人臉照片搜尋系統
 
 AI 驅動的人臉搜尋工具，掃描照片集並使用自拍照作為輸入，找出包含特定人物的圖片。
@@ -35,6 +34,7 @@ AI 驅動的人臉搜尋工具，掃描照片集並使用自拍照作為輸入�
 - 相似度分數
 - 排名
 - 統計數據
+- 可重複使用的已保存資料集索引
 
 此為搜尋約 200 張照片的範例結果。
 
@@ -51,6 +51,8 @@ AI 驅動的人臉搜尋工具，掃描照片集並使用自拍照作為輸入�
 - 邊界框視覺化
 - 搜尋統計
 - JSON 結果匯出
+- 可重複使用的已保存資料集索引
+- Windows 一鍵啟動批次檔（`run_app.bat`）
 - Streamlit 網頁介面
 
 ---
@@ -71,16 +73,16 @@ Aggregator --> Results
 
 模組職責：
 
-| 模組 | 職責 |
-|------|------|
-| `app/ui.py` | Streamlit 介面 |
-| `app/main.py` | 管線流程編排 |
-| `core/face_service.py` | 人臉偵測 + 特徵向量擷取 |
-| `core/file_scanner.py` | 資料集圖片掃描 |
-| `core/query_builder.py` | 建構查詢特徵向量 |
-| `core/matcher.py` | 餘弦相似度比對 |
-| `core/result_aggregator.py` | 合併重複比對結果 |
-| `core/reporter.py` | 匯出統計數據與 JSON 輸出 |
+| 模組                        | 職責                     |
+| --------------------------- | ------------------------ |
+| `app/ui.py`                 | Streamlit 介面           |
+| `app/main.py`               | 管線流程編排             |
+| `core/face_service.py`      | 人臉偵測 + 特徵向量擷取  |
+| `core/file_scanner.py`      | 資料集圖片掃描           |
+| `core/query_builder.py`     | 建構查詢特徵向量         |
+| `core/matcher.py`           | 餘弦相似度比對           |
+| `core/result_aggregator.py` | 合併重複比對結果         |
+| `core/reporter.py`          | 匯出統計數據與 JSON 輸出 |
 
 ---
 
@@ -111,17 +113,21 @@ Aggregation --> Results
 # 技術架構
 
 程式語言
+
 - Python 3.12
 
 電腦視覺
+
 - InsightFace（buffalo_l 模型）
 
 函式庫
+
 - OpenCV
 - NumPy
 - Streamlit
 
 相似度指標
+
 - 餘弦相似度（Cosine Similarity）
 
 ---
@@ -185,13 +191,25 @@ streamlit run app/ui.py
 
 然後在瀏覽器中開啟終端機顯示的本機網址。
 
+Windows 快捷啟動：
+
+```
+run_app.bat
+```
+
+這會直接使用 `.venv\Scripts\python.exe` 啟動，不需要先手動啟用虛擬環境。
+
 ---
 
 # 使用指南
 
 系統採用**兩階段工作流程**：先準備資料集（一次性），再重複搜尋。
 
-## 步驟 1 — 上傳資料集資料夾
+## 步驟 1 — 選擇既有資料集或上傳新資料夾
+
+如果之前已經準備過資料集，可直接從 **Saved Dataset** 下拉選單選取並立即搜尋。
+
+如果要建立新的可重用資料集，則在 **Upload Dataset Folder** 區塊上傳資料夾。
 
 在側邊欄的「Upload Dataset Folder」區塊點擊 **Browse files**，選擇包含待搜尋照片的資料夾。
 
@@ -205,18 +223,18 @@ streamlit run app/ui.py
 
 ---
 
-## 步驟 2 — 準備資料集
+## 步驟 2 — 命名並準備資料集
 
-點擊 **⚙️ Prepare** 按鈕。
+在 **New Dataset Name** 輸入資料集名稱後，點擊 **⚙️ Prepare**。
 
 系統將會：
 
 1. 掃描已上傳的圖片
 2. 偵測人臉
 3. 擷取人臉特徵向量
-4. 建立可重複使用的記憶體索引
+4. 將可重複使用的資料集索引保存到 `data/dataset/<dataset-name>`
 
-每個資料集只需執行**一次**。準備期間所有其他控制項會停用，可點擊 **❌ Cancel** 中斷並切換資料集。
+每個資料集只需執行**一次**。準備期間所有其他控制項會停用，可點擊 **❌ Cancel** 中斷。
 
 ---
 
@@ -240,10 +258,12 @@ streamlit run app/ui.py
 ```
 
 降低門檻值
+
 - 較高召回率
 - 較多比對結果
 
 提高門檻值
+
 - 較高精確率
 - 較少比對結果
 
@@ -295,6 +315,12 @@ face-photo-search
 │
 ├─ README.md
 ├─ README.zh-TW.md
+├─ run_app.bat
+│
+├─ data
+│  ├─ dataset
+│  ├─ demo_photos
+│  └─ demo_selfies
 │
 ├─ docs
 │  ├─ screenshots
@@ -336,12 +362,12 @@ docs/architecture_overview.md
 
 目前做法：
 
-- 資料集特徵向量經一次性預處理後快取於記憶體中
-- 重複搜尋時直接使用快取索引，無需重新計算
+- 資料集特徵向量經一次性預處理後保存於 `data/dataset`
+- 重複搜尋時可跨 rerun / session 重用已保存索引
+- 結果圖片會視需要從已保存的資料集快照中載入
 
 未來可能的優化：
 
-- 持久化特徵向量快取（磁碟儲存）
 - FAISS 向量索引
 - GPU 加速
 

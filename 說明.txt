@@ -1,0 +1,15 @@
+1. 使用工具為ChatGPT 5.3進行討論/規劃，再產生prompt給Github Copilot - Claude Opus 4.6 執行，因為Opus 4.6很貴
+2. 安裝與執行步驟、使用說明在README.md
+3. 開發過程紀錄在docs內
+
+   vibe_log.md - 開發流程紀錄
+   gpt_prompt_log.md - gpt討論的prompt/reply紀錄
+   gpt_session_log.md - gpt討論的過程摘要
+   prompt_log.md - Opus的prompt/reply紀錄
+   session_log.md - Opus的過程摘要
+
+
+4. github專案位置: https://github.com/JerryCHuangWonderland/face-photo-search
+   方便閱讀README
+5. README內的截圖為我的個人照從公司尾牙3百多張照片搜尋的結果，
+   專案內的data資料夾內提供的demo素材為網路上抓的藝人照片/合照，沒有公司的資料
